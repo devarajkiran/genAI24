@@ -1,0 +1,199 @@
+Certainly! Below is a step-by-step guide to implementing the entire document summarization application, including the code for each component, a suggested project structure, and an overview of how to integrate everything.
+
+Step 1: Project Structure
+Here’s a suggested directory structure:
+
+bash
+Copy code
+document_summarizer/
+│
+├── app.py                      # Main application script
+├── requirements.txt            # Dependencies
+├── ui/
+│   ├── ui.py                   # User interface logic
+│   └── templates/
+│       └── index.html          # HTML template for the UI
+│
+├── services/
+│   ├── document_processor.py   # PDF, DOCX, TXT extraction
+│   ├── text_preprocessor.py    # Text chunking logic
+│   ├── embeddings_generator.py # Embedding generation and storage
+│   ├── retriever.py            # Query processing and retrieval
+│   └── summarizer.py           # GPT summarization logic
+│
+└── utils/
+    ├── file_handler.py         # Utility functions for file handling
+    └── pinecone_setup.py       # Pinecone initialization and index management
+Step 2: Setting Up Dependencies
+Add the required dependencies to requirements.txt:
+
+txt
+Copy code
+openai
+langchain
+PyPDF2
+python-docx
+flask
+pinecone-client
+Then, install them:
+
+bash
+Copy code
+pip install -r requirements.txt
+Step 3: User Interface (ui/ui.py)
+We’ll use Flask for the web interface, allowing users to upload documents, select pages, and receive summaries.
+
+python
+Copy code
+from flask import Flask, render_template, request
+from services.document_processor import process_pdf
+from services.summarizer import generate_summary
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return "No file uploaded.", 400
+    file = request.files['file']
+    if not file.filename.endswith('.pdf'):
+        return "Only PDF files are supported for now.", 400
+    
+    # Process the file and extract text
+    selected_pages = request.form.getlist('selected_pages')
+    text = process_pdf(file, selected_pages)
+    
+    # Generate summary
+    summary = generate_summary(text)
+    
+    return summary
+
+if __name__ == '__main__':
+    app.run(debug=True)
+Step 4: HTML Template (ui/templates/index.html)
+Here’s a basic form to upload a PDF file and select pages:
+
+html
+Copy code
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Document Summarizer</title>
+</head>
+<body>
+    <h1>Document Summarizer</h1>
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <label>Select PDF File:</label>
+        <input type="file" name="file" accept=".pdf"><br><br>
+        
+        <label>Select Pages (e.g., 1,2,3):</label>
+        <input type="text" name="selected_pages"><br><br>
+        
+        <button type="submit">Summarize</button>
+    </form>
+</body>
+</html>
+Step 5: Document Processing (services/document_processor.py)
+Add functionality to extract text from specific pages:
+
+python
+Copy code
+import PyPDF2
+
+def process_pdf(file, selected_pages):
+    selected_pages = [int(p) - 1 for p in selected_pages]  # Convert to 0-based index
+    reader = PyPDF2.PdfReader(file)
+    extracted_text = ""
+    
+    for page_num in selected_pages:
+        if page_num < len(reader.pages):
+            extracted_text += reader.pages[page_num].extract_text()
+        else:
+            print(f"Page {page_num + 1} out of range.")
+    
+    return extracted_text
+Step 6: Text Preprocessing (services/text_preprocessor.py)
+Split extracted text into smaller chunks:
+
+python
+Copy code
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+def split_text_into_chunks(text, chunk_size=1000, chunk_overlap=200):
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    return text_splitter.split_text(text)
+Step 7: Embeddings Generator (services/embeddings_generator.py)
+Convert text chunks to embeddings and store them:
+
+python
+Copy code
+import openai
+from langchain.embeddings.openai import OpenAIEmbeddings
+from utils.pinecone_setup import create_pinecone_index
+
+def generate_embeddings(text_chunks):
+    embeddings = OpenAIEmbeddings()
+    index = create_pinecone_index()
+    index.store_texts(text_chunks, embedding=embeddings)
+Step 8: Retriever (services/retriever.py)
+Retrieve relevant text chunks based on query:
+
+python
+Copy code
+from langchain.chains import RetrievalQA
+
+def retrieve_chunks(query, pinecone_index):
+    qa = RetrievalQA.from_chain_type(
+        llm=openai.ChatCompletion.create,
+        chain_type="stuff",
+        retriever=pinecone_index.as_retriever()
+    )
+    result = qa.run(query)
+    return result
+Step 9: Summarization (services/summarizer.py)
+Summarize retrieved content:
+
+python
+Copy code
+import openai
+from services.text_preprocessor import split_text_into_chunks
+from services.embeddings_generator import generate_embeddings
+from services.retriever import retrieve_chunks
+
+def generate_summary(text):
+    # Split into chunks and create embeddings
+    chunks = split_text_into_chunks(text)
+    generate_embeddings(chunks)
+    
+    # Retrieve relevant content
+    query = "Summarize the document."
+    summary = retrieve_chunks(query, pinecone_index)
+    return summary
+Step 10: Pinecone Setup (utils/pinecone_setup.py)
+Set up Pinecone index:
+
+python
+Copy code
+import pinecone
+
+def create_pinecone_index():
+    pinecone.init(api_key="YOUR_PINECONE_API_KEY", environment="us-west1-gcp")
+    index_name = "document-summaries"
+    if index_name not in pinecone.list_indexes():
+        pinecone.create_index(index_name, dimension=1536)
+    return pinecone.Index(index_name)
+Step 11: Running the Application
+Run the application using:
+
+bash
+Copy code
+python app.py
+Further Enhancements
+Page Preview: Implement a page preview feature so users can easily choose specific pages.
+Support More Formats: Add DOCX and TXT extraction in services/document_processor.py.
+Fine-Tune Summarization: Adjust query processing to summarize sections differently (e.g., chapter-wise summaries).
+This implementation covers a basic yet comprehensive end-to-end flow for the document summarization tool, including page selection and handling for PDFs. You can expand and modify this as per your needs!
